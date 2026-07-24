@@ -1,9 +1,9 @@
 {
-  "name": "media-metadata",
+  "name": "media-tools",
   "version": "0.1.0",
-  "description": "Read EXIF/GPS and container metadata from images and videos (HEIC, JPG, MOV, MP4) without exiftool",
+  "description": "Utilities for image/video files: read EXIF/GPS/metadata and rename by capture timestamp (HEIC, JPG, MOV, MP4)",
   "author": {
     "name": "Vikrant"
   },
-  "keywords": ["metadata", "exif", "gps", "heic", "images", "video", "ffprobe"]
+  "keywords": ["metadata", "exif", "gps", "heic", "images", "video", "rename", "ffprobe", "exiftool"]
 }
