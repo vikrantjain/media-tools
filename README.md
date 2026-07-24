@@ -31,6 +31,19 @@ preview-then-apply flow. Live Photo pairs (`.HEIC` + `.MP4`/`.MOV`) keep a share
 Ask naturally: "rename these photos by the date they were taken", "organize this folder by
 timestamp".
 
+### `media-dedup` — find near-duplicate photos
+
+Finds visually near-duplicate images (burst shots, Live Photo stills, re-saves) via
+perceptual hashing (phash + dhash) and flags the **lower-quality** copy in each group by a
+sharpness score. **Read-only by default**; with `--move` it quarantines flagged copies into
+confidence-tiered subfolders (`dupes_by_confidence/1_confident`, `2_likely`, `3_possible`) —
+a reversible move, **never a delete**. Keepers (the sharpest copy) stay, and each flagged
+still's paired Live Photo video travels with it. Runs via `uv` (`pillow-heif`, `pillow`,
+`imagehash`, `numpy`).
+
+Ask naturally: "find duplicate photos in this folder", "which of these burst shots is the
+sharpest", "clean up similar images".
+
 ## iPhone specifics
 
 Handles HEIC + Live Photo (`.MP4`) pairs and local-vs-UTC timestamp correlation (image
