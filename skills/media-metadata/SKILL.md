@@ -9,9 +9,21 @@ description: >
 
 # Media Metadata
 
-Extract metadata from images and videos. **Prefer exiftool** — it is the most complete tool
-and reads things the fallback cannot (e.g. GPS embedded in `.MOV`/`.MP4`, hundreds of maker
-tags, more formats).
+Extract metadata from images and videos. **exiftool is the best tool** — it is the most
+complete and reads things the fallback cannot (e.g. GPS embedded in `.MOV`/`.MP4`, hundreds of
+maker tags, more formats).
+
+## Rule: always try exiftool first; never fall back silently
+
+1. **Always** run `ensure_exiftool.sh` first and use exiftool if it resolves. This includes
+   the one-time CPAN download — a ~7 MB fetch is expected and fine, not a reason to fall back.
+2. **Only if exiftool cannot be obtained** (no `exiftool` on PATH, no cached copy, and the
+   download fails because there's no network or no `perl`) do you consider the fallback.
+3. Before using the fallback, **stop and tell the user**: exiftool is the best option, it is
+   unavailable here (state why — e.g. no network + no perl), and the PIL/ffprobe fallback is
+   more limited (**no video GPS**, fewer tags). **Ask for approval** to proceed with it.
+4. Do **not** run the fallback until the user approves. If they decline, report that exiftool
+   is required and stop.
 
 ## Primary path — exiftool (use this first)
 
@@ -45,9 +57,9 @@ Notes:
 
 ## Fallback path — PIL + ffprobe (offline, no exiftool)
 
-Use only if `ensure_exiftool.sh` fails (no network to CPAN **and** no `perl`). This path has
-**no video GPS** and fewer tags. System `python3` usually lacks pip/pillow-heif, so run via
-`uv` (do **not** `pip install`):
+Use **only after** `ensure_exiftool.sh` has failed *and* the user has approved the fallback
+per the rule above. This path has **no video GPS** and fewer tags. System `python3` usually
+lacks pip/pillow-heif, so run via `uv` (do **not** `pip install`):
 
 ```bash
 uv run --with pillow-heif --with pillow python3 \
