@@ -1,0 +1,9 @@
+{
+  "name": "media-metadata",
+  "version": "0.1.0",
+  "description": "Read EXIF/GPS and container metadata from images and videos (HEIC, JPG, MOV, MP4) without exiftool",
+  "author": {
+    "name": "Vikrant"
+  },
+  "keywords": ["metadata", "exif", "gps", "heic", "images", "video", "ffprobe"]
+}
