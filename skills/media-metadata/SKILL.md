@@ -29,7 +29,7 @@ maker tags, more formats).
 
 Get a usable exiftool binary. The bootstrap checks PATH, then a local cache, else downloads
 the standalone Perl distribution from CPAN **once** (~7 MB) and caches it under
-`~/.cache/media-metadata` — pure Perl, needs only `perl`, no root, no compile:
+`~/.cache/media-tools` — pure Perl, needs only `perl`, no root, no compile:
 
 ```bash
 ET=$("${CLAUDE_PLUGIN_ROOT}/skills/media-metadata/scripts/ensure_exiftool.sh")

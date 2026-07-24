@@ -5,7 +5,7 @@
 set -euo pipefail
 
 VER="13.30"
-CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/media-metadata"
+CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/media-tools"
 DEST="$CACHE/Image-ExifTool-$VER"
 BIN="$DEST/exiftool"
 

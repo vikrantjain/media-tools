@@ -12,7 +12,7 @@ Extracts EXIF, GPS, camera/lens info, timestamps, dimensions, and video codec/du
 **Prefers exiftool** — the most complete option, and the only one here that reads GPS embedded
 in `.MOV`/`.MP4`. The bootstrap uses a system `exiftool` on PATH if present; otherwise it
 downloads the standalone Perl distribution from CPAN **once** (~7 MB) and caches it under
-`~/.cache/media-metadata` (pure Perl, needs only `perl`, no root, no compile). Subsequent runs
+`~/.cache/media-tools` (pure Perl, needs only `perl`, no root, no compile). Subsequent runs
 use the cache with no network. If exiftool truly can't be obtained (no perl and no network), it
 falls back — **only after telling you and getting approval** — to a `uv`-run
 `pillow-heif`/`pillow` + `ffprobe` path (fewer tags, no video GPS, but fully offline).
