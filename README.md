@@ -44,6 +44,25 @@ still's paired Live Photo video travels with it. Runs via `uv` (`pillow-heif`, `
 Ask naturally: "find duplicate photos in this folder", "which of these burst shots is the
 sharpest", "clean up similar images".
 
+### `media-cull` — find unusable photos
+
+Flags images that are bad **on their own merits**, not merely redundant: `blown` (lens flare
+or light leak — a large *contiguous* clipped region with no texture left), `dark` (pocket and
+lens-cap shots), `uniform` (blank wall, covered lens), `blurry` (gross smearing). Every gate
+needs two independent signals to agree, so a white shirt under stage lights isn't "blown".
+**Read-only by default**, writing a report plus a **contact sheet** — because "is this photo
+bad?" is a visual call a metric can't finish, and the sheet renders HEICs through bundled
+libheif even when the desktop viewer can't open them. With `--move` it quarantines into
+`culled/<reason>/` — reversible, **never a delete**. Detection is pure numpy/scipy: no model
+inference, deterministic, zero per-image cost at any library size.
+
+Complements `media-dedup` rather than overlapping it — a flare-ruined frame is perfectly
+sharp and its perceptual hash lands far outside dedup's grouping threshold, so dedup can
+never see it. Cull first, then dedup what remains.
+
+Ask naturally: "find bad photos in this folder", "which of these are overexposed", "cull this
+shoot".
+
 ## iPhone specifics
 
 Handles HEIC + Live Photo (`.MP4`) pairs and local-vs-UTC timestamp correlation (image

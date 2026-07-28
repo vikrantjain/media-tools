@@ -1,9 +1,9 @@
 {
   "name": "media-tools",
   "version": "0.1.0",
-  "description": "Utilities for image/video files: read EXIF/GPS/metadata, rename by capture timestamp, and find near-duplicate photos (HEIC, JPG, MOV, MP4)",
+  "description": "Utilities for image/video files: read EXIF/GPS/metadata, rename by capture timestamp, find near-duplicate photos, and cull unusable shots (HEIC, JPG, MOV, MP4)",
   "author": {
     "name": "Vikrant"
   },
-  "keywords": ["metadata", "exif", "gps", "heic", "images", "video", "rename", "ffprobe", "exiftool", "dedup", "duplicates", "perceptual-hash"]
+  "keywords": ["metadata", "exif", "gps", "heic", "images", "video", "rename", "ffprobe", "exiftool", "dedup", "duplicates", "perceptual-hash", "cull", "overexposed", "blurry", "quality"]
 }
