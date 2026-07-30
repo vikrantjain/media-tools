@@ -5,9 +5,10 @@ description: >
   folder and quarantine the lower-quality copies into confidence-tiered subfolders for
   review — never deleting. Uses perceptual hashing (phash + dhash) plus a sharpness
   score, with resolution taking precedence so an original is never discarded in favour
-  of a downscaled re-save. Use when a task is to find similar/duplicate images, clean
-  up a photo folder, or pick the best frame from a burst. Handles HEIC/JPG/PNG and Live
-  Photo video pairs.
+  of a downscaled re-save, and a minimum quality margin so two equally good burst frames
+  are reported as a tie rather than one being picked arbitrarily. Use when a task is to
+  find similar/duplicate images, clean up a photo folder, or pick the best frame from a
+  burst. Handles HEIC/JPG/PNG and Live Photo video pairs.
 ---
 
 # Media Dedup
@@ -22,8 +23,11 @@ into subfolders.
 A copy is flagged only when **all** of these hold:
 
 1. **Near-identical** to the keeper of its group — phash within 10 (see tiers), and
-2. **Lower quality** than that keeper, and
+2. **Lower quality by a margin the metric can actually resolve** (default 5%), and
 3. **Not higher-resolution** than that keeper.
+
+Close matches that fail only #2 are reported under **“too close to call”** and are
+never moved.
 
 ### Quality means resolution first, then sharpness
 
@@ -42,10 +46,37 @@ at all, as a backstop.
 
 The best copy in each group is the **keeper** and is never moved.
 
+### A quality difference too small to measure is not a quality difference
+
+Sharpness is measured on a 256×256 downscale — on a 3520×1980 photo, ~97% of the pixels
+are gone before the number exists. It resolves *smeared vs sharp*, nothing finer.
+
+The comparison used to have no floor, so it named a loser whichever way the numbers fell.
+On a burst-heavy folder that is most of the output: of 32 flags on a real 122-file export,
+**21 rested on a gap under 5% and 6 under 1%** — the narrowest a pair of showroom frames at
+2783.6 vs 2780.7 (0.10%), two visibly different moments, both perfectly sharp.
+
+Those verdicts were not merely close, they were **unstable**. Re-measuring at a 252px box
+instead of 256 — an implementation detail with no bearing on photo quality — reversed 2 of
+6 near-ties tested, swapping keeper and discard. Which frame got quarantined was a coin
+flip.
+
+So a gap under `--min-margin` (default **5%**) now makes the pair a **tie**: reported with
+both scores, flagged as neither, moved never. On that folder this took 32 flags down to 11,
+each with a real margin, and surfaced the other 21 as ties. `--min-margin 0` restores the
+old always-pick-a-loser behaviour.
+
+**Resolution differences bypass the margin entirely** — a downscaled re-save is the worse
+copy however it scores, because that is a class difference, not a margin. Verified: a
+re-save measuring 7266.8 against its 6.97 MP original's 2783.6 (2.6× *sharper*) is still
+flagged, and the original is still the keeper.
+
 ## Confidence tiers
 
-Files are bucketed by how strict the visual match to the keeper is, so the user can
-review from least-certain to most-certain:
+Tiers rank **how strict the visual match is**, not how confident the verdict is. A file in
+`1_confident` is one the tool is confident *looks like* its keeper; whether it is the worse
+copy is the separate question the margin above answers. Read the tier as "how alike", not
+"how safe to delete".
 
 | Tier | Match strictness | Folder |
 |------|------------------|--------|
@@ -78,7 +109,8 @@ uv run --with pillow-heif --with pillow --with imagehash --with numpy python3 \
 ```
 
 `--stats` prints megapixels, size, sharpness and phash for every file — useful for
-explaining why a particular copy was chosen as the keeper.
+explaining why a particular copy was chosen as the keeper. `--min-margin PCT` sets the
+quality gap required to flag (default 5; `0` reproduces the pre-margin behaviour).
 
 **Always run the read-only report first and show the user the tiers before `--move`.**
 
@@ -106,10 +138,15 @@ Scans **the given folder only, not subdirectories**.
   the quarantine folder instead of being deleted. The bare `mv … && rm -rf` form does
   both: it silently overwrote the file in the folder and then deleted the evidence. To
   actually delete a reviewed tier, `rm -rf dupes_by_confidence/1_confident`.
-- **Sharpness is a proxy, not judgment**: in near-tie groups the "worse" copy may be only
-  marginally softer — that's why files land in review folders rather than being deleted.
-  Unlike `media-cull` there is no contact sheet, so `--stats` plus opening the pair is how
-  you check a call you doubt.
+- **Sharpness is a proxy, not judgment**: it says which frame carries more fine detail, not
+  which is the better photo — the sharper burst frame can be the one where someone blinked.
+  Pairs whose scores are within the margin are now held back as ties instead of being
+  ranked, but a flagged file is still a *suggestion*, which is why these land in review
+  folders rather than being deleted. Unlike `media-cull` there is no contact sheet, so
+  `--stats` plus opening the pair is how you check a call you doubt.
+- **A tie is not "no duplicate found"** — it means the two really do look alike and the tool
+  is declining to pick, usually because they are distinct moments in a burst. Deciding
+  between them is a visual call; the tool has told you where to look.
 - **Ignores media-cull's contact sheets** (`cull_review*.jpg`, and any file carrying the
   sheet marker), since the recommended order is cull first, then dedup — which leaves a
   sheet sitting in this tool's input folder.

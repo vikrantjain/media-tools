@@ -57,7 +57,12 @@ Finds visually near-duplicate images (burst shots, Live Photo stills, re-saves) 
 perceptual hashing (phash + dhash) and flags the **lower-quality** copy in each group.
 Quality is **resolution first, then sharpness** — sharpness alone is scale-blind, so a
 downscaled-and-sharpened messaging-app re-save outscores the 12 MP original it came from and
-would otherwise have been kept in its place. **Read-only by default**; with `--move` it
+would otherwise have been kept in its place. Sharpness must also differ by a **minimum margin**
+(default 5%, `--min-margin`) before either copy is called worse: measured on a 256×256
+downscale it cannot resolve finer than that, and below the margin the verdict flips under
+trivial changes to the measurement. Pairs inside the margin are reported as **ties** and never
+moved — on a real 122-file export this cut 32 flags to 11 real ones plus 21 ties.
+**Read-only by default**; with `--move` it
 quarantines flagged copies into confidence-tiered subfolders
 (`dupes_by_confidence/1_confident`, `2_likely`, `3_possible`) — a reversible move, **never a
 delete**. Keepers stay, and each flagged still's paired Live Photo video travels with it.

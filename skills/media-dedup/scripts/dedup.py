@@ -8,8 +8,11 @@ Keepers (the best copy in each group) are never moved. Nothing is deleted.
 
 A copy is flagged only if ALL of these hold:
   * it is near-identical to a better copy in the same group (phash within 10), and
-  * it is lower quality (softer, by variance-of-Laplacian) than that copy, and
+  * it is lower quality than that copy by a MEANINGFUL margin (see MIN_MARGIN), and
   * it is not materially higher-resolution than that copy (see MP_VETO).
+Copies that match closely but whose quality is within the margin are reported as
+ties and left alone -- naming a loser between two equally good frames is a coin
+flip, and this tool moves files.
 Tier = how strict the visual match to the keeper is:
   1_confident  phash<=5  AND dhash<=5
   2_likely     phash<=8  AND dhash<=8
@@ -47,6 +50,27 @@ TIER_MAX_PHASH = 10
 # made the re-save the keeper and put the 12MP original in 2_likely. Resolution is
 # the tiebreaker sharpness cannot be, so it gets a veto.
 MP_VETO = 1.3
+
+# Minimum sharpness gap, as a fraction of the sharper copy, before one frame may be
+# called the worse copy of another. Below it the two are reported as a tie and neither
+# is flagged.
+#
+# Sharpness is measured on a 256x256 downscale, so on a 3520x1980 photo ~97% of the
+# pixels are gone before the number exists. It resolves "smeared vs sharp" and nothing
+# finer. Without a floor the comparison still always named a loser, and on a burst-heavy
+# folder that is most of the output: of 32 flags on a real 122-file export, 21 rested on
+# a gap under 5% and 6 under 1% -- the narrowest a pair of showroom frames at 2783.6 vs
+# 2780.7, two visibly different moments, both sharp.
+#
+# Those verdicts are not merely close, they are unstable: re-measuring at a 252px box
+# instead of 256 -- an implementation detail with no bearing on photo quality -- reversed
+# 2 of 6 near-ties tested, swapping keeper and discard. A margin the metric cannot
+# resolve is noise, and 5% is comfortably above that noise while still catching real
+# differences (a genuine soft/sharp pair in that folder differed by 30%).
+#
+# Resolution differences bypass this entirely: a downscaled re-save is the worse copy
+# however it scores, which is a class difference, not a margin.
+MIN_MARGIN = 0.05
 
 
 def analyze(path):
@@ -109,24 +133,47 @@ def full_res(item, best_mp):
     return item["mp"] >= best_mp / MP_VETO
 
 
-def lower_quality(cand, keep, best_mp):
-    """True if `cand` is a worse copy of `keep`, not merely a different frame.
+def margin(cand, keep):
+    """Sharpness shortfall of `cand` against `keep`, as a fraction of the sharper one.
+
+    Positive => cand is softer. Normalised so the threshold means the same thing on a
+    dim interior at 1400 and a detailed streetscape at 3400.
+    """
+    hi = max(cand["sharp"], keep["sharp"])
+    return 0.0 if hi <= 0 else (keep["sharp"] - cand["sharp"]) / hi
+
+
+def quality_verdict(cand, keep, best_mp, min_margin):
+    """'worse' | 'tie' | 'better' -- is `cand` a worse copy of `keep`?
 
     Resolution class first, sharpness only *within* a class. Sharpness alone got
     this exactly backwards on the commonest real case -- an original plus a
     messaging-app re-save -- because the re-save is unsharp-masked and scores
     higher: it both crowned the 1MP re-save as keeper and then spared it for
     being "sharper" than the 12MP original it was displacing.
+
+    Within a class the gap must clear `min_margin`, or the two are a tie. A class
+    difference is decisive on its own and never falls back to the margin.
     """
     cand_full, keep_full = full_res(cand, best_mp), full_res(keep, best_mp)
     if cand_full != keep_full:
-        return keep_full            # the downscaled copy is the worse one
-    return cand["sharp"] < keep["sharp"]     # same class: ties are kept
+        return "worse" if keep_full else "better"   # the downscaled copy is worse
+    m = margin(cand, keep)
+    if m > min_margin:
+        return "worse"
+    if m < -min_margin:
+        return "better"
+    return "tie"
 
 
-def classify(items):
-    """Return ({tier: [(cand, keeper), ...]}, notes) for flagged lower-quality copies."""
+def classify(items, min_margin=MIN_MARGIN):
+    """Return (tiers, ties, notes).
+
+    tiers  {tier: [(cand, keeper), ...]}  flagged as meaningfully worse copies
+    ties   [(cand, keeper), ...]          matched closely, quality too close to call
+    """
     tiers = {1: [], 2: [], 3: []}
+    ties = []
     notes = {"far": 0, "highres": 0}
 
     for g in build_groups(items):
@@ -150,14 +197,17 @@ def classify(items):
             if cand["mp"] > keep["mp"] * MP_VETO:
                 notes["highres"] += 1
                 continue
-            if not lower_quality(cand, keep, best_mp):
+            verdict = quality_verdict(cand, keep, best_mp, min_margin)
+            if verdict == "better":
                 continue
             t = tier_of(cand, keep)
             if t is None:
                 notes["far"] += 1             # only transitively linked
                 continue
-            tiers[t].append((cand, keep))
-    return tiers, notes
+            # A tie is still a close visual match worth showing -- it just isn't a
+            # quality judgment, so it is reported and never moved.
+            (ties if verdict == "tie" else tiers[t]).append((cand, keep))
+    return tiers, ties, notes
 
 
 def main():
@@ -167,8 +217,14 @@ def main():
                     help=f"quarantine flagged copies into {QUARANTINE}/")
     ap.add_argument("--stats", action="store_true",
                     help="print metrics for every file, not just flagged ones")
+    ap.add_argument("--min-margin", type=float, default=MIN_MARGIN * 100,
+                    metavar="PCT",
+                    help=f"sharpness gap required to call one copy worse than another "
+                         f"(default {MIN_MARGIN * 100:g}%%); below it the pair is a tie. "
+                         f"0 restores the old always-pick-a-loser behaviour.")
     args = ap.parse_args()
     DIR = args.dir
+    min_margin = args.min_margin / 100.0
 
     if not os.path.isdir(DIR):
         sys.exit(f"error: not a directory: {DIR}")
@@ -186,7 +242,7 @@ def main():
             print(f"skip {p}: {e}", file=sys.stderr)
         progress(i + 1, len(files))
 
-    tiers, notes = classify(items)
+    tiers, ties, notes = classify(items, min_margin)
     total = sum(len(v) for v in tiers.values())
 
     if args.stats:
@@ -198,7 +254,8 @@ def main():
         print()
 
     print(f"\n{len(items)} images scanned. {total} lower-quality near-duplicates "
-          f"across {sum(1 for v in tiers.values() if v)} populated tiers.\n")
+          f"across {sum(1 for v in tiers.values() if v)} populated tiers"
+          + (f", plus {len(ties)} pair(s) too close to call.\n" if ties else ".\n"))
 
     for t in (1, 2, 3):
         rows = sorted(tiers[t], key=lambda r: r[0]["name"])
@@ -209,6 +266,17 @@ def main():
             print(f"  {cand['name']:<26} sharp={cand['sharp']:<9} {cand['mp']}MP "
                   f"{cand['bytes']//1024}KB   (keeper {keep['name']} "
                   f"sharp={keep['sharp']})")
+        print()
+
+    if ties:
+        print(f"===== TOO CLOSE TO CALL : {len(ties)} pairs =====")
+        print(f"Near-identical, but quality differs by less than "
+              f"{min_margin * 100:g}% -- which this metric cannot resolve. NOT flagged "
+              f"and not moved; pick by eye if you want one gone.")
+        for cand, keep in sorted(ties, key=lambda r: r[0]["name"]):
+            print(f"  {cand['name']:<26} sharp={cand['sharp']:<9} vs "
+                  f"{keep['name']} sharp={keep['sharp']}"
+                  f"   ({margin(cand, keep) * 100:+.2f}%)")
         print()
 
     if notes["highres"] or notes["far"]:
@@ -223,6 +291,8 @@ def main():
 
     if not total:
         print("Nothing flagged. Nothing was moved and no files were written.")
+        if ties:
+            print(f"({len(ties)} pair(s) matched closely but were too close to call.)")
         return
 
     if not args.move:
@@ -232,7 +302,7 @@ def main():
         return
 
     base = os.path.join(DIR, QUARANTINE)
-    print(f"Moving into {base}/ ...")
+    print(f"Moving into {base}/ ... (ties are not moved)")
     all_renamed = []
     for t in (1, 2, 3):
         dst = os.path.join(base, TIER_DIRS[t])
