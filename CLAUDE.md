@@ -19,9 +19,11 @@ sets it deliberately so file browsers sort by real capture time.
 ### Concretely, do not
 
 - Pass exiftool any tag assignment (`-Tag=value`, `-overwrite_original`, `-tagsFromFile`).
-  Only the filesystem pseudo-tags `-FileName<` and `-FileModifyDate<` are permitted;
-  those rename/re-stamp without rewriting file contents (verified: md5 unchanged, no
-  `_original` backups created).
+  **Use exiftool to read, never to write.** `media-rename` does its rename with
+  `os.rename` + `os.utime`, which cannot reach the file's contents at all — prefer that
+  over exiftool's `-FileName<`/`-FileModifyDate<` pseudo-tags in new code. Those two
+  pseudo-tags are still safe if you need them (verified: md5 unchanged, no `_original`
+  backups), but they put an exiftool write path next to irreplaceable files for no gain.
 - Re-save an original through Pillow. `Image.open(p)` … `.save(p)` silently drops EXIF
   and re-encodes the pixels. Read originals; never write back to them.
 - Write a derived file (contact sheet, thumbnail, report) to a path that might be an
@@ -43,6 +45,23 @@ and silently suffixed `__1` without reporting it, months after cull had fixed bo
 
 A fix to file-moving or overwrite behavior in one of these tools almost certainly
 belongs in the shared module, so it reaches the other.
+
+## The filename stem is the Live Photo contract between skills
+
+`media-cull` and `media-dedup` decide that a video belongs to a still because they
+**share a stem** — that is all they have, since neither reads EXIF. So any code that
+renames must keep a pair on one stem, and must never give an unrelated still and video
+the same stem. `media-rename` therefore groups on Apple's `ContentIdentifier`, not on
+timestamps: the clip's `CreationDate` can be a second before the still's
+`DateTimeOriginal`, and per-extension collision counters drift apart. Naming per file
+split 5 of 37 pairs on a real export and forged 3 false ones, which would make a later
+`--move` quarantine a stranger's video and orphan the real still.
+
+If you touch naming, verify against `ContentIdentifier` rather than eyeballing stems:
+
+```bash
+exiftool -T -filename -ContentIdentifier *   # same id must => same stem, and vice versa
+```
 
 ### Verifying a change respects this
 

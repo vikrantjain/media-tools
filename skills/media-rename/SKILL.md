@@ -13,11 +13,16 @@ Rename files to `yyyymmdd_hhmmss.ext` (e.g. `20231202_203640.jpg` = 2 Dec 2023, 
 stamp the filesystem modified-time with the same moment. **Embedded metadata is never changed**
 — only the filename and the filesystem date.
 
-**exiftool is the best (and required) tool** here: it renames by date natively, sets the
-filesystem date in the same pass, uses the correct **local** capture time (including video,
-via `-api QuickTimeUTC=1`), and does not rewrite file content. Use it via the shared bootstrap in the `media-metadata`
-skill. There is no good fallback for this task (especially for video local time); if exiftool
-cannot be obtained, inform the user and stop rather than improvising — see `../media-metadata/SKILL.md`.
+**exiftool is required** here — it is the only thing that reads the correct **local**
+capture time (including video, via `-api QuickTimeUTC=1`) and Apple's `ContentIdentifier`.
+Use it via the shared bootstrap in the `media-metadata` skill. There is no good fallback for
+this task (especially for video local time); if exiftool cannot be obtained, inform the user
+and stop rather than improvising — see `../media-metadata/SKILL.md`.
+
+exiftool reads the metadata; the script does the renaming itself. exiftool's native
+date-based rename cannot be used, because it names each file from *that file's own*
+timestamp with per-name collision counters, and both of those split Live Photo pairs — see
+"Live Photo pairs" below.
 
 ## Always preview first, then apply
 
@@ -29,7 +34,9 @@ cannot be obtained, inform the user and stop rather than improvising — see `..
    ```
 
 2. Look at the mapping. Call out anything notable: files with **no timestamp** (left
-   unchanged), and same-second **collisions** (auto-suffixed `-1`, `-2`, … via `%-c`).
+   unchanged), same-second **collisions** (auto-suffixed `-1`, `-2`, …), files pulled in
+   uninvited to keep a pair together, and any Live Photo group that had two files of the
+   same type. The preview reports each of these explicitly; `[pair]` marks paired files.
 
 3. **Apply** only after the user is OK with the preview:
 
@@ -43,11 +50,10 @@ Accepts individual files or directories (recurses into dirs with `-r`).
 ## Details / guarantees
 
 - **Timestamp source**, **highest priority first**: `CreationDate` → `CreateDate` →
-  `DateTimeOriginal`. exiftool applies the assignments in order and the *last* one holding a
-  value wins, so the script lists them in the reverse of this order — read the script's
-  argument order as lowest-to-highest, not highest-to-lowest. For photos all present tags
-  normally agree and this is capture time; for iPhone videos `CreationDate` carries **local**
-  time with its UTC offset, so those get local wall-clock time.
+  `DateTimeOriginal`. For photos all present tags normally agree and this is capture time;
+  for iPhone videos `CreationDate` carries **local** time with its UTC offset, so those get
+  local wall-clock time. Within a Live Photo group the **still's** stamp names the whole
+  group, since that is the shutter moment.
 - **Video timezone**: QuickTime stores `CreateDate` in **UTC**, so the script passes
   `-api QuickTimeUTC=1` to convert it to local time. This matters for any video *without*
   `CreationDate` — a non-Apple/Android MP4 — which would otherwise be named with its UTC
@@ -55,10 +61,34 @@ Accepts individual files or directories (recurses into dirs with `-r`).
   silently skewed by your UTC offset. Verified: an 18:00Z clip is named `20200601_233000`
   in `+05:30`, not `20200601_180000`. Apple video is unaffected either way, since its
   `CreationDate` already carries an offset and still wins.
-- **Filesystem date**: `-FileModifyDate` is set to the same timestamp (this is the `touch`).
-- **Embedded metadata untouched**: only `FileName` and `FileModifyDate` (both filesystem-level
-  pseudo-tags) are written; file bytes are byte-for-byte identical (verified via md5).
-- **No timestamp?** Files lacking all three date tags are skipped with a warning — they are not
+- **Filesystem date**: the mtime is set to the same timestamp (this is the `touch`).
+- **Embedded metadata untouched**: the rename is `os.rename` and the timestamp is `os.utime`
+  — a directory entry and a filesystem attribute. Neither can rewrite a byte of the image,
+  which is a stronger guarantee than exiftool's `-FileName<` offers, since no exiftool write
+  path is involved at all. Verified byte-for-byte via md5, with no `_original` backups.
+- **No timestamp?** Files lacking all three date tags are skipped and listed — they are not
   renamed. Decide with the user how to handle those (e.g. fall back to `FileModifyDate`).
-- **Live Photos**: a `.HEIC` and its paired `.MP4`/`.MOV` share the capture time, so they get
-  the same `yyyymmdd_hhmmss` base name (different extensions) — the pairing is preserved.
+  `media-cull`'s contact sheet has no date tags, so it is skipped automatically.
+- **Live Photos: naming is per group, not per file.** A group is a still plus its motion clip,
+  identified by Apple's **`ContentIdentifier`** — not by filename and not by timestamp. Every
+  member gets one shared stem and keeps its own extension. Two independent bugs made the
+  naive per-file approach split pairs, and both are why grouping is not optional:
+  - **The still and the clip do not always share a timestamp.** iPhone writes the clip's
+    `CreationDate` up to a second *before* the still's `DateTimeOriginal`
+    (`IMG_1626.HEIC` 20:14:48 vs `IMG_1626.MP4` 20:14:47). Measured on a real 122-file
+    export: **4 of 37 pairs** straddled a second boundary and landed on two stems.
+  - **Collision counters were per target name**, so `.heic` and `.MP4` counted separately.
+    Three stills in one second took ``/`-1`/`-2` while that second's single clip took ``:
+    one pair split, and the clip then shared a stem with an *unrelated* still. Three such
+    false pairs appeared in that same folder.
+
+  This matters well beyond tidiness: `media-cull` and `media-dedup` pair a clip to its still
+  **by stem**, and the recommended order is rename → cull → dedup. A forged stem makes a
+  later `--move` carry off a stranger's clip and orphan the real still. On the folder above
+  the fix gives 37/37 pairs intact, 0 split, 0 forged (previously 5 split, 3 forged).
+- **Naming a single file adopts its partner.** Renaming `IMG_1794.HEIC` alone would orphan
+  `IMG_1794.MP4`, so same-directory siblings sharing its `ContentIdentifier` are pulled in
+  and reported. Unrelated files are never touched.
+- **Idempotent**: a group already sitting on a correct stem keeps it, so re-running is a
+  no-op rather than a renumbering. Renames are staged through temp names, so a set of files
+  already holding each other's target names swaps cleanly instead of clobbering.

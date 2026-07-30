@@ -36,10 +36,17 @@ timeline for this folder".
 
 Renames files to `yyyymmdd_hhmmss.ext` (e.g. `20231202_203640.jpg`) and stamps the filesystem
 modified-time to match — **without altering embedded metadata** (file bytes stay identical).
-Uses exiftool's native date-based rename via the shared bootstrap: local-time source
-(`CreationDate` → `CreateDate` → `DateTimeOriginal`, highest priority first, with
-`-api QuickTimeUTC=1` so non-Apple videos aren't named in UTC), `-c` collision suffixes, and a
-preview-then-apply flow. Live Photo pairs (`.HEIC` + `.MP4`/`.MOV`) keep a shared base name.
+exiftool reads the timestamps via the shared bootstrap (`CreationDate` → `CreateDate` →
+`DateTimeOriginal`, highest priority first, with `-api QuickTimeUTC=1` so non-Apple videos
+aren't named in UTC); the rename itself is `os.rename` + `os.utime`, so no write path into the
+file exists at all. Collisions get `-1`, `-2` suffixes, and there is a preview-then-apply flow.
+
+Live Photo pairs (`.HEIC` + `.MP4`/`.MOV`) are named **as a group**, keyed on Apple's
+`ContentIdentifier` rather than on filename or timestamp — because iPhone writes the motion
+clip up to a second before the still, and because per-extension collision counters used to
+give a pair two different stems. Both split pairs on a real export (5 of 37), and one gave an
+unrelated still and clip a shared stem, which would make a later `media-cull`/`media-dedup`
+`--move` carry off the wrong video. Now 37/37 survive.
 
 Ask naturally: "rename these photos by the date they were taken", "organize this folder by
 timestamp".
