@@ -103,6 +103,11 @@ past ~650 images, too tall for Pillow to save at all.
 - **Never overwrites**: if a file of that name is already quarantined from an earlier
   run, the new one lands as `name__1.ext` and the run says so. Overwriting would be
   a silent delete, which this tool does not do.
+- **Never touches image metadata.** Originals are only ever *read* and *renamed* —
+  `--move` is a filesystem move, so bytes and EXIF are preserved exactly. The one
+  file written is the contact sheet, and it is stamped with an internal marker so a
+  rerun can replace its own output but **refuses to write over any file it did not
+  create**: `--sheet vacation.jpg` is an error, not a destroyed photo.
 - **Reversible**: undo with `mv -n culled/*/* . && rmdir culled/* culled`. The `-n`
   keeps a restore from clobbering a same-named file that is back in the folder, and
   `rmdir` refuses to remove a non-empty directory — so anything `mv` skipped stays

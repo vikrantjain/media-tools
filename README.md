@@ -3,6 +3,17 @@
 A Claude Code plugin with utilities for working with image and video files
 (HEIC/HEIF, JPG, PNG, MOV, MP4, and more).
 
+## Hard guarantee: embedded metadata is never modified
+
+No skill here writes the data inside your photos — EXIF, GPS, camera/lens, capture
+timestamps are only ever *read*. Originals are touched in exactly two ways, both of
+which leave the file's bytes identical: they are **renamed**, and they are **moved**
+(`--move` quarantines are filesystem moves). Verified byte-for-byte via md5.
+
+`media-rename` additionally sets the *filesystem* modify-time — the "Date Modified"
+your file browser shows, which lives outside the file and is not part of the image.
+That is a deliberate feature, and it still rewrites none of the photo's own bytes.
+
 ## Skills
 
 ### `media-metadata` — read metadata

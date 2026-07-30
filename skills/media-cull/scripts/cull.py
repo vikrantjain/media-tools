@@ -27,7 +27,7 @@ Run via uv (system python usually lacks these libs):
 """
 import sys, os, argparse
 import pillow_heif
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, PngImagePlugin
 import numpy as np
 from scipy import ndimage
 
@@ -38,6 +38,11 @@ VID_EXT = ("MP4", "MOV", "mp4", "mov")
 REASONS = ("blown", "dark", "uniform", "blurry")
 SHEET_NAME = "cull_review.jpg"
 PER_SHEET = 40      # flagged images per contact sheet before paginating
+
+# Stamped into every sheet we write so a later run can tell its own regenerable
+# output apart from one of the user's photos. Without it, `--sheet myphoto.jpg`
+# would silently overwrite an original -- destroying the image and its metadata.
+SHEET_MARKER = "media-cull-contact-sheet"
 
 # `mv -n` so restoring never clobbers a same-named file that is back in the folder,
 # and `rmdir` rather than `rm -rf` because it refuses to remove a non-empty dir --
@@ -160,6 +165,51 @@ def _font(size):
     return ImageFont.load_default()
 
 
+def is_our_sheet(path):
+    """True if `path` is a contact sheet this tool wrote (carries SHEET_MARKER)."""
+    try:
+        with Image.open(path) as im:
+            info = dict(im.info)
+    except Exception:
+        return False
+    for v in (info.get("comment"), info.get("Comment")):
+        if isinstance(v, bytes):
+            v = v.decode("utf-8", "replace")
+        if v and SHEET_MARKER in v:
+            return True
+    return False
+
+
+def guard_sheet_target(path):
+    """Refuse to write a sheet over anything we did not write ourselves.
+
+    Originals are never modified by this tool, and that has to hold for the sheet
+    path too: `--sheet vacation.jpg` used to overwrite vacation.jpg in place, which
+    destroyed the photo and its metadata, while the same name being excluded from
+    the scan meant the report never mentioned it.
+    """
+    if os.path.exists(path) and not is_our_sheet(path):
+        sys.exit(f"error: refusing to overwrite {path} -- it exists and was not "
+                 f"written by this tool.\n"
+                 f"       Originals are never modified. Pick another --sheet path, "
+                 f"or delete that file first if you are sure.")
+
+
+def save_sheet(sheet, out_path):
+    """Write a sheet, stamped with SHEET_MARKER so a rerun may replace it."""
+    if os.path.splitext(out_path)[1].lower() == ".png":
+        meta = PngImagePlugin.PngInfo()
+        meta.add_text("Comment", SHEET_MARKER)
+        sheet.save(out_path, pnginfo=meta)
+        return
+    try:
+        sheet.save(out_path, quality=88, comment=SHEET_MARKER.encode())
+    except (TypeError, ValueError, OSError):
+        # Format without comment support: still write it, but an unmarked sheet
+        # will not be overwritable next run -- safe direction.
+        sheet.save(out_path, quality=88)
+
+
 def contact_sheets(flagged, out_path, per_sheet=PER_SHEET):
     """Write flagged images as one or more contact sheets; return the paths.
 
@@ -206,7 +256,8 @@ def one_sheet(flagged, out_path, cell=360, cols=4):
                font=f_name, fill=(255, 255, 255))
         d.text((cx, cy + cell + 19), why(m, reason), font=f_why, fill=(170, 170, 170))
 
-    sheet.save(out_path, quality=88)
+    guard_sheet_target(out_path)
+    save_sheet(sheet, out_path)
     return out_path
 
 
@@ -291,6 +342,8 @@ def main():
         if ext not in Image.registered_extensions():
             sys.exit(f"error: --sheet needs a known image extension, got '{ext or args.sheet}' "
                      f"(try .jpg or .png)")
+        # Up front, before analysis, so pointing --sheet at a photo fails instantly.
+        guard_sheet_target(args.sheet)
 
     names = sorted(os.listdir(DIR))
     skip = sheet_names(names, args.sheet)
