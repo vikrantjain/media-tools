@@ -22,8 +22,9 @@ Extracts EXIF, GPS, camera/lens info, timestamps, dimensions, and video codec/du
 
 **Prefers exiftool** — the most complete option, and the only one here that reads GPS embedded
 in `.MOV`/`.MP4`. The bootstrap uses a system `exiftool` on PATH if present; otherwise it
-downloads the standalone Perl distribution from CPAN **once** (~7 MB) and caches it under
-`~/.cache/media-tools` (pure Perl, needs only `perl`, no root, no compile). Subsequent runs
+downloads the standalone Perl distribution from CPAN **once** (~8 MB), verifies it against a
+pinned sha256 before extracting, and caches it under `~/.cache/media-tools` (pure Perl, needs
+only `perl`, no root, no compile). Subsequent runs
 use the cache with no network. If exiftool truly can't be obtained (no perl and no network), it
 falls back — **only after telling you and getting approval** — to a `uv`-run
 `pillow-heif`/`pillow` + `ffprobe` path (fewer tags, no video GPS, but fully offline).
@@ -36,7 +37,8 @@ timeline for this folder".
 Renames files to `yyyymmdd_hhmmss.ext` (e.g. `20231202_203640.jpg`) and stamps the filesystem
 modified-time to match — **without altering embedded metadata** (file bytes stay identical).
 Uses exiftool's native date-based rename via the shared bootstrap: local-time source
-(`DateTimeOriginal` → `CreateDate` → `CreationDate`), `-c` collision suffixes, and a
+(`CreationDate` → `CreateDate` → `DateTimeOriginal`, highest priority first, with
+`-api QuickTimeUTC=1` so non-Apple videos aren't named in UTC), `-c` collision suffixes, and a
 preview-then-apply flow. Live Photo pairs (`.HEIC` + `.MP4`/`.MOV`) keep a shared base name.
 
 Ask naturally: "rename these photos by the date they were taken", "organize this folder by
@@ -45,12 +47,16 @@ timestamp".
 ### `media-dedup` — find near-duplicate photos
 
 Finds visually near-duplicate images (burst shots, Live Photo stills, re-saves) via
-perceptual hashing (phash + dhash) and flags the **lower-quality** copy in each group by a
-sharpness score. **Read-only by default**; with `--move` it quarantines flagged copies into
-confidence-tiered subfolders (`dupes_by_confidence/1_confident`, `2_likely`, `3_possible`) —
-a reversible move, **never a delete**. Keepers (the sharpest copy) stay, and each flagged
-still's paired Live Photo video travels with it. Runs via `uv` (`pillow-heif`, `pillow`,
-`imagehash`, `numpy`).
+perceptual hashing (phash + dhash) and flags the **lower-quality** copy in each group.
+Quality is **resolution first, then sharpness** — sharpness alone is scale-blind, so a
+downscaled-and-sharpened messaging-app re-save outscores the 12 MP original it came from and
+would otherwise have been kept in its place. **Read-only by default**; with `--move` it
+quarantines flagged copies into confidence-tiered subfolders
+(`dupes_by_confidence/1_confident`, `2_likely`, `3_possible`) — a reversible move, **never a
+delete**. Keepers stay, and each flagged still's paired Live Photo video travels with it.
+`phash ≤10` is a hard ceiling on every tier, so transitively-linked files that don't actually
+resemble their keeper are reported as spared rather than flagged. Runs via `uv`
+(`pillow-heif`, `pillow`, `imagehash`, `numpy`).
 
 Ask naturally: "find duplicate photos in this folder", "which of these burst shots is the
 sharpest", "clean up similar images".
@@ -76,6 +82,19 @@ never see it. Cull first, then dedup what remains.
 
 Ask naturally: "find bad photos in this folder", "which of these are overexposed", "cull this
 shoot".
+
+## Layout
+
+```
+lib/media_common.py        shared by media-cull and media-dedup
+skills/<skill>/SKILL.md    what the agent reads
+skills/<skill>/scripts/    what it runs
+```
+
+`media-cull` and `media-dedup` both quarantine files, move Live Photo pairs and score
+sharpness. Those parts live in `lib/media_common.py` rather than being copied into each:
+when they *were* copied, the copies drifted, and the fixes for an unsafe undo command and an
+unreported collision-rename landed in only one of the two.
 
 ## iPhone specifics
 

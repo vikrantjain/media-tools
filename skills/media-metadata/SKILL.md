@@ -28,8 +28,11 @@ maker tags, more formats).
 ## Primary path — exiftool (use this first)
 
 Get a usable exiftool binary. The bootstrap checks PATH, then a local cache, else downloads
-the standalone Perl distribution from CPAN **once** (~7 MB) and caches it under
-`~/.cache/media-tools` — pure Perl, needs only `perl`, no root, no compile:
+the standalone Perl distribution from CPAN **once** (~8 MB) and caches it under
+`~/.cache/media-tools` — pure Perl, needs only `perl`, no root, no compile. The tarball is
+Perl source that then gets executed, so it is **verified against a pinned sha256** (published
+in CPAN's `CHECKSUMS`) before extraction, and unpacked to a temp dir and moved into place so
+an interrupted run cannot leave a half-extracted cache behind:
 
 ```bash
 ET=$("${CLAUDE_PLUGIN_ROOT}/skills/media-metadata/scripts/ensure_exiftool.sh")
@@ -47,6 +50,10 @@ Then use it. Useful invocations:
 # One file, human-readable:
 "$ET" -a -G1 -s /path/to/IMG_0001.HEIC
 ```
+
+If the download 404s, the pinned release was pruned — CPAN lists only recent versions. Check
+<https://exiftool.org> for the current version and update `VER` **and** `SHA256` together at
+the top of `ensure_exiftool.sh`; the error message says so too.
 
 Notes:
 - `-n` gives decimal GPS/altitude instead of `deg min sec` — easier to parse.
@@ -68,6 +75,8 @@ uv run --with pillow-heif --with pillow python3 \
 ```
 
 `read_meta.py` writes full JSON + prints a summary table (date, device, GPS, dims, duration).
+The JSON is keyed by **full path**, not basename, so passing two folders that both contain
+`IMG_0001.HEIC` reports both (the table disambiguates them as `d1/IMG_0001.HEIC`).
 Its non-obvious gotchas, if you adapt it: in PIL, `exif.items()` returns `GPSInfo` (0x8825) and
 `ExifOffset` (0x8769) as **ints, not dicts** — skip them, then read `exif.get_ifd(0x8769)`
 (lens/exposure/ISO/sub-second) and `exif.get_ifd(0x8825)` (GPS). GPS is `(deg,min,sec)` + ref.

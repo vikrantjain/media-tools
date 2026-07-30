@@ -28,7 +28,21 @@ sets it deliberately so file browsers sort by real capture time.
   original. This was a real bug: `--sheet vacation.jpg` overwrote that photo in place
   and, because the name was excluded from the scan, never reported it. `cull.py` now
   stamps its sheets with `SHEET_MARKER` and refuses to overwrite any file lacking it —
-  keep that guard on any new image-writing code path.
+  keep that guard on any new image-writing code path. Guard **every** path you will
+  write before writing the first one: the per-page check used to let sheet page 1 land
+  before page 2 was rejected.
+
+## Shared code goes in `lib/media_common.py`
+
+Quarantine moves, Live Photo pairing, collision suffixing, the undo command and the
+sharpness metric are shared by `media-cull` and `media-dedup` and live in
+`lib/media_common.py`. Do not copy them back into a skill. They were copies once, the
+copies drifted, and both divergences cost data: dedup kept the unsafe
+`mv … && rm -rf` undo (which overwrites a restored file and then deletes the evidence)
+and silently suffixed `__1` without reporting it, months after cull had fixed both.
+
+A fix to file-moving or overwrite behavior in one of these tools almost certainly
+belongs in the shared module, so it reaches the other.
 
 ### Verifying a change respects this
 

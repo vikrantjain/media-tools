@@ -92,14 +92,19 @@ review is a generated sheet and not "move them and browse the folder".
 
 Sheets hold 40 images each and paginate past that (`cull_review_001.jpg`,
 `cull_review_002.jpg`, …) — one unbounded sheet would be both unreviewable and,
-past ~650 images, too tall for Pillow to save at all.
+past ~650 images, too tall for Pillow to save at all. Every page's target path is
+checked against the overwrite guard *before the first page is written*, so a
+`--sheet` name that collides with a real photo on page 2 fails without having
+written page 1.
 
 ## Behavior notes
 
 - **Detection is deterministic** — numpy/scipy only, no model inference. Same answer
   every run, at any library size, with no per-image inference cost. This is
   deliberate: the tool moves files, so decisions must be reproducible and auditable.
-- **Live Photo pairs**: a flagged still's same-stem `.MP4`/`.MOV` moves with it.
+  Progress is reported on stderr for runs over 200 files.
+- **Live Photo pairs**: a flagged still's same-stem `.MP4`/`.MOV` moves with it
+  (extension matched case-insensitively, so `.Mp4` pairs too).
 - **Never overwrites**: if a file of that name is already quarantined from an earlier
   run, the new one lands as `name__1.ext` and the run says so. Overwriting would be
   a silent delete, which this tool does not do.

@@ -6,9 +6,10 @@ Usage (always via uv so pillow-heif is available):
 
 PATH may be a directory (scanned non-recursively) or individual files.
 Images -> full EXIF incl. GPS via PIL. Videos -> ffprobe format+streams.
-Writes a {filename: {...}} JSON map to OUT.json and prints a summary table.
+Writes a {filepath: {...}} JSON map to OUT.json and prints a summary table.
 """
 import sys, os, json, subprocess
+from collections import Counter
 import pillow_heif
 from PIL import Image
 from PIL.ExifTags import TAGS, GPSTAGS
@@ -97,27 +98,43 @@ def dms_to_dd(dms, ref):
         return None
 
 
+def display_names(paths):
+    """Basename where that is unambiguous, else parent/basename.
+
+    Results are keyed by full path because keying by basename lost data: passing
+    two directories that both contain IMG_0001.HEIC silently dropped one of them
+    from the JSON *and* from the table, with no warning.
+    """
+    bases = [os.path.basename(p) for p in paths]
+    dupes = {b for b, n in Counter(bases).items() if n > 1}
+    return {p: (os.path.join(os.path.basename(os.path.dirname(p)), b)
+                if b in dupes else b)
+            for p, b in zip(paths, bases)}
+
+
 def main():
     if len(sys.argv) < 3:
         print(__doc__)
         sys.exit(1)
     out_path, paths = sys.argv[1], sys.argv[2:]
+    files = gather_files(paths)
+    shown = display_names(files)
     results = {}
-    for path in gather_files(paths):
-        name = os.path.basename(path)
-        ext = name.lower().rsplit(".", 1)[-1] if "." in name else ""
+    for path in files:
+        ext = path.lower().rsplit(".", 1)[-1] if "." in os.path.basename(path) else ""
         if ext in IMAGE_EXTS:
-            results[name] = {"kind": "image", "meta": image_meta(path)}
+            results[path] = {"kind": "image", "meta": image_meta(path)}
         elif ext in VIDEO_EXTS:
-            results[name] = {"kind": "video", "meta": video_meta(path)}
+            results[path] = {"kind": "video", "meta": video_meta(path)}
         else:
-            results[name] = {"kind": "other"}
+            results[path] = {"kind": "other"}
 
     with open(out_path, "w") as fh:
         json.dump(results, fh, indent=2, default=str)
 
     # summary table
-    for name, info in results.items():
+    for path, info in results.items():
+        name = shown[path]
         m = info.get("meta", {})
         if info["kind"] == "image":
             dt = m.get("DateTimeOriginal") or m.get("DateTime")
