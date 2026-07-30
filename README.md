@@ -48,13 +48,16 @@ sharpest", "clean up similar images".
 
 Flags images that are bad **on their own merits**, not merely redundant: `blown` (lens flare
 or light leak — a large *contiguous* clipped region with no texture left), `dark` (pocket and
-lens-cap shots), `uniform` (blank wall, covered lens), `blurry` (gross smearing). Every gate
-needs two independent signals to agree, so a white shirt under stage lights isn't "blown".
+lens-cap shots), `uniform` (blank wall, covered lens), `blurry` (gross smearing). The first
+three gates need two signals to agree, so a white shirt under stage lights isn't "blown";
+`blurry` is a single signal and the catch-all, so it's the label to double-check.
 **Read-only by default**, writing a report plus a **contact sheet** — because "is this photo
 bad?" is a visual call a metric can't finish, and the sheet renders HEICs through bundled
 libheif even when the desktop viewer can't open them. With `--move` it quarantines into
-`culled/<reason>/` — reversible, **never a delete**. Detection is pure numpy/scipy: no model
-inference, deterministic, zero per-image cost at any library size.
+`culled/<reason>/` — reversible, **never a delete**: a name already quarantined gets a `__1`
+suffix rather than being overwritten. Detection is pure numpy/scipy: no model inference,
+deterministic, no per-image inference cost at any library size. Scans one folder, not
+subdirectories.
 
 Complements `media-dedup` rather than overlapping it — a flare-ruined frame is perfectly
 sharp and its perceptual hash lands far outside dedup's grouping threshold, so dedup can

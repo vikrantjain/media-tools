@@ -32,12 +32,19 @@ TIER_DIRS = {1: "1_confident", 2: "2_likely", 3: "3_possible"}
 
 
 def sharpness(im):
-    """Variance of the Laplacian on a 256x256 grayscale copy — higher = sharper."""
+    """Variance of the Laplacian on a 256x256 grayscale copy — higher = sharper.
+
+    Interior only: np.roll wraps, so including the border scores the top-vs-bottom
+    seam as detail. On a bright-sky-over-dark-ground frame that fake gradient is
+    large enough to swamp the real difference between a sharp and a blurred
+    sibling, which is exactly the comparison this feeds. Kept identical to
+    media-cull's copy so sharpness numbers stay comparable across the two tools.
+    """
     g = im.convert("L").resize((256, 256))
     a = np.asarray(g, dtype=np.float64)
     lap = (-4 * a + np.roll(a, 1, 0) + np.roll(a, -1, 0)
            + np.roll(a, 1, 1) + np.roll(a, -1, 1))
-    return float(lap.var())
+    return float(lap[1:-1, 1:-1].var())
 
 
 def analyze(path):
@@ -103,20 +110,35 @@ def classify(items):
     return tiers
 
 
+def free_path(dst_dir, name):
+    """A destination path that does not already exist, suffixing __1, __2, ...
+
+    os.replace would silently overwrite, which here means destroying a file
+    already quarantined under the same name by an earlier run -- a real delete,
+    despite this tool promising it never deletes.
+    """
+    stem, ext = os.path.splitext(name)
+    cand, i = os.path.join(dst_dir, name), 1
+    while os.path.exists(cand):
+        cand = os.path.join(dst_dir, f"{stem}__{i}{ext}")
+        i += 1
+    return cand
+
+
 def move_with_pair(name, src_dir, dst_dir):
     moved = []
-    src = os.path.join(src_dir, name)
-    if os.path.exists(src):
+
+    def relocate(fname):
         os.makedirs(dst_dir, exist_ok=True)
-        os.replace(src, os.path.join(dst_dir, name))
-        moved.append(name)
+        os.replace(os.path.join(src_dir, fname), free_path(dst_dir, fname))
+        moved.append(fname)
+
+    if os.path.exists(os.path.join(src_dir, name)):
+        relocate(name)
     stem = os.path.splitext(name)[0]
     for ext in VID_EXT:
-        vp = os.path.join(src_dir, f"{stem}.{ext}")
-        if os.path.exists(vp):
-            os.makedirs(dst_dir, exist_ok=True)
-            os.replace(vp, os.path.join(dst_dir, f"{stem}.{ext}"))
-            moved.append(f"{stem}.{ext}")
+        if os.path.exists(os.path.join(src_dir, f"{stem}.{ext}")):
+            relocate(f"{stem}.{ext}")
     return moved
 
 

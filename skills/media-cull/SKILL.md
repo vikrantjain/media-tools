@@ -32,15 +32,22 @@ Run both.
 
 ## Reasons
 
-Each gate requires **two independent signals** to agree, so a legitimately bright
-subject is not "blown" and a deliberately low-key shot is not "dark".
+The first three gates require **two signals** to agree, so a legitimately bright
+subject is not "blown" and a deliberately low-key shot is not "dark". `blurry` is
+the exception — one signal, and the last branch, so anything not caught above falls
+into it. That makes `blurry` the least trustworthy label of the four; see the limits
+at the bottom.
 
 | Reason | Fires when | Catches |
 |---|---|---|
 | `blown` | largest contiguous clipped region ≥15% **and** clipped-plus-textureless ≥10% | lens flare, light leak, blowout |
 | `dark` | ≥60% crushed to black **and** mean luma <35 | pocket shots, lens-cap frames |
 | `uniform` | ≥90% locally flat **and** global stdev <12 | blank wall, ceiling, covered lens |
-| `blurry` | variance-of-Laplacian <250 | gross smearing |
+| `blurry` | variance-of-Laplacian <250 (single signal) | gross smearing |
+
+For `blown` and `dark` the two signals really are close to independent. For
+`uniform` they are weaker than that — local flatness and global stdev both measure
+absence of variation — but it errs toward under-firing, which is the safe direction.
 
 **Contiguity is what makes `blown` work.** A white shirt under stage lights and a
 lens flare can clip the same *number* of pixels; only the flare clips them in one
@@ -64,6 +71,9 @@ uv run --with pillow-heif --with pillow --with numpy --with scipy python3 \
 `--stats` prints metrics for every file (useful for tuning or explaining a call).
 `--sheet PATH` redirects the contact sheet; `--sheet -` skips it.
 
+Scans **the given folder only, not subdirectories** — point it at the folder that
+actually holds the images, not a parent like `DCIM/`, or it will report 0 scanned.
+
 **Always run the read-only pass first and have the user look at the contact sheet
 before `--move`.** The bar here is higher than media-dedup's: a quarantined
 duplicate still has a surviving keeper, but every file cull flags is *unique*, so a
@@ -80,19 +90,31 @@ systems whose libheif is too old for iPhone 16/17 `tmap` HEICs — those files s
 on the sheet even when the desktop image viewer refuses to open them. That is why
 review is a generated sheet and not "move them and browse the folder".
 
+Sheets hold 40 images each and paginate past that (`cull_review_001.jpg`,
+`cull_review_002.jpg`, …) — one unbounded sheet would be both unreviewable and,
+past ~650 images, too tall for Pillow to save at all.
+
 ## Behavior notes
 
 - **Detection is deterministic** — numpy/scipy only, no model inference. Same answer
-  every run, at any library size, at zero per-image cost. This is deliberate: the
-  tool moves files, so decisions must be reproducible and auditable.
+  every run, at any library size, with no per-image inference cost. This is
+  deliberate: the tool moves files, so decisions must be reproducible and auditable.
 - **Live Photo pairs**: a flagged still's same-stem `.MP4`/`.MOV` moves with it.
-- **Reversible**: undo with `mv culled/*/* . && rm -rf culled`. Delete one reviewed
-  category with `rm -rf culled/<reason>`.
+- **Never overwrites**: if a file of that name is already quarantined from an earlier
+  run, the new one lands as `name__1.ext` and the run says so. Overwriting would be
+  a silent delete, which this tool does not do.
+- **Reversible**: undo with `mv -n culled/*/* . && rmdir culled/* culled`. The `-n`
+  keeps a restore from clobbering a same-named file that is back in the folder, and
+  `rmdir` refuses to remove a non-empty directory — so anything `mv` skipped stays
+  in `culled/` rather than being deleted. To actually delete a reviewed category,
+  `rm -rf culled/<reason>`.
 - **Known limits**, worth saying out loud rather than discovering later:
   - Sharpness is measured after a 256×256 downscale, so **mild blur is invisible**
     by design — only gross smearing trips `blurry`.
   - Low-detail scenes (fog, plain backdrops, minimalist compositions) can score low
-    on `blurry`/`uniform` honestly. That is what the contact sheet is for.
+    on `blurry`/`uniform` honestly, and `blurry` has no second signal to catch the
+    mistake — a genuinely sharp but smooth frame is indistinguishable from a blurred
+    detailed one by this metric. That is what the contact sheet is for.
   - `dark` and `uniform` thresholds are set conservatively and were validated only
     against folders containing no such files — they are calibrated not to
     false-positive, which means they may under-fire. Loosen if a real folder

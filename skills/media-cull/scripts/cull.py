@@ -6,9 +6,13 @@ judged bad in isolation -- a blown-out flare, an accidental pocket shot, a smear
 frame. Detection is pure numpy/scipy: deterministic, no model inference, same
 answer on every run.
 
-Never modifies or moves your originals unless you pass --move. The only file it
-writes by default is the contact sheet, which exists because "is this photo bad?"
-is a visual judgment a metric cannot finish -- you make the final call by looking.
+Never modifies or moves your originals unless you pass --move, and never deletes:
+--move relocates into culled/<reason>/, suffixing __1 rather than overwriting if
+that name is already quarantined. The only file it writes by default is the contact
+sheet, which exists because "is this photo bad?" is a visual judgment a metric
+cannot finish -- you make the final call by looking.
+
+Scans the given directory only, not subdirectories.
 
 Reasons:
   blown    a large contiguous region is clipped to white AND has no texture left
@@ -33,6 +37,12 @@ IMG_EXT = (".heic", ".heif", ".jpg", ".jpeg", ".png")
 VID_EXT = ("MP4", "MOV", "mp4", "mov")
 REASONS = ("blown", "dark", "uniform", "blurry")
 SHEET_NAME = "cull_review.jpg"
+PER_SHEET = 40      # flagged images per contact sheet before paginating
+
+# `mv -n` so restoring never clobbers a same-named file that is back in the folder,
+# and `rmdir` rather than `rm -rf` because it refuses to remove a non-empty dir --
+# so anything mv skipped stays safely in culled/ instead of being deleted.
+UNDO = "mv -n culled/*/* . && rmdir culled/* culled"
 
 WORK = 640          # long edge for region metrics
 SHARP_BOX = 256     # matches media-dedup, so sharpness numbers are comparable
@@ -52,11 +62,19 @@ T_BLURRY_SHARP = 250.0
 
 
 def sharpness(g):
-    """Variance of the Laplacian on a fixed 256x256 grayscale copy."""
+    """Variance of the Laplacian on the interior of a fixed 256x256 grayscale copy.
+
+    The border is excluded because np.roll wraps: including it compares the top
+    row against the bottom (and left against right) and counts that seam as
+    detail. On a horizon shot -- bright sky over dark ground -- the fake seam
+    gradient is big enough to hide real blur: a gaussian r=10 blur measured 285
+    with the seam included and 2.6 without, against a threshold of 250. Detailed
+    frames move less than 1%, so T_BLURRY_SHARP did not need recalibrating.
+    """
     a = np.asarray(g.resize((SHARP_BOX, SHARP_BOX)), dtype=np.float64)
     lap = (-4 * a + np.roll(a, 1, 0) + np.roll(a, -1, 0)
            + np.roll(a, 1, 1) + np.roll(a, -1, 1))
-    return float(lap.var())
+    return float(lap[1:-1, 1:-1].var())
 
 
 def largest_blob(mask):
@@ -64,8 +82,11 @@ def largest_blob(mask):
 
     This is what separates a flare from scattered specular highlights: both can
     clip the same number of pixels, but only the flare clips them all in one piece.
+
+    8-connectivity, so a flare bridged only diagonally counts as the single mass
+    it visually is; 4-connectivity would split it and under-measure the blob.
     """
-    lbl, n = ndimage.label(mask)
+    lbl, n = ndimage.label(mask, structure=np.ones((3, 3), dtype=bool))
     if not n:
         return 0.0
     return float(np.bincount(lbl.ravel())[1:].max() / mask.size)
@@ -139,7 +160,24 @@ def _font(size):
     return ImageFont.load_default()
 
 
-def contact_sheet(flagged, out_path, cell=360, cols=4):
+def contact_sheets(flagged, out_path, per_sheet=PER_SHEET):
+    """Write flagged images as one or more contact sheets; return the paths.
+
+    Paginated because a single sheet grows without bound: 200 flagged files makes
+    a 1480x20108 image no one can review, and past ~650 the save fails outright on
+    Pillow's 65500px limit -- after the whole folder has already been analyzed.
+    """
+    if len(flagged) <= per_sheet:
+        return [one_sheet(flagged, out_path)]
+    stem, ext = os.path.splitext(out_path)
+    paths = []
+    for i in range(0, len(flagged), per_sheet):
+        page = i // per_sheet + 1
+        paths.append(one_sheet(flagged[i:i + per_sheet], f"{stem}_{page:03d}{ext}"))
+    return paths
+
+
+def one_sheet(flagged, out_path, cell=360, cols=4):
     """Grid of every flagged image, captioned with file name and evidence.
 
     Rendered through pillow-heif's bundled libheif, so it shows HEICs the system
@@ -172,22 +210,62 @@ def contact_sheet(flagged, out_path, cell=360, cols=4):
     return out_path
 
 
+def sheet_names(names, sheet_arg):
+    """Contact sheets we may have written, this run or an earlier one.
+
+    Never analyze our own sheet. A sheet of dark frames self-flags -- measured
+    `dark` at 1-2 cells, `uniform` at 5, `blurry` at 6+ -- so culling a folder of
+    pocket shots leaves a sheet that the next --move run would quarantine.
+    Both the default name and any --sheet name are excluded, plus their _001
+    pagination pages: keying only on the name passed in would let a stale
+    cull_review.jpg from a previous default run become an input.
+    """
+    stems = [os.path.splitext(SHEET_NAME)]
+    if sheet_arg and sheet_arg != "-":
+        stems.append(os.path.splitext(os.path.basename(sheet_arg)))
+    skip = set()
+    for stem, ext in stems:
+        for n in names:
+            b, e = os.path.splitext(n)
+            if e.lower() == ext.lower() and (b == stem or b.startswith(stem + "_")):
+                skip.add(n)
+    return skip
+
+
+def free_path(dst_dir, name):
+    """A destination path that does not already exist, suffixing __1, __2, ...
+
+    os.replace would silently overwrite, which for this tool means destroying a
+    file already quarantined under the same name by an earlier run -- a real
+    delete, in a tool whose whole promise is that it never deletes.
+    """
+    stem, ext = os.path.splitext(name)
+    cand, i = os.path.join(dst_dir, name), 1
+    while os.path.exists(cand):
+        cand = os.path.join(dst_dir, f"{stem}__{i}{ext}")
+        i += 1
+    return cand
+
+
 def move_with_pair(name, src_dir, dst_dir):
     """Move a still and its Live Photo video (same stem) together."""
-    moved = []
-    src = os.path.join(src_dir, name)
-    if os.path.exists(src):
+    moved, renamed = [], []
+
+    def relocate(fname):
+        dst = free_path(dst_dir, fname)
         os.makedirs(dst_dir, exist_ok=True)
-        os.replace(src, os.path.join(dst_dir, name))
-        moved.append(name)
+        os.replace(os.path.join(src_dir, fname), dst)
+        moved.append(fname)
+        if os.path.basename(dst) != fname:
+            renamed.append((fname, os.path.basename(dst)))
+
+    if os.path.exists(os.path.join(src_dir, name)):
+        relocate(name)
     stem = os.path.splitext(name)[0]
     for ext in VID_EXT:
-        vp = os.path.join(src_dir, f"{stem}.{ext}")
-        if os.path.exists(vp):
-            os.makedirs(dst_dir, exist_ok=True)
-            os.replace(vp, os.path.join(dst_dir, f"{stem}.{ext}"))
-            moved.append(f"{stem}.{ext}")
-    return moved
+        if os.path.exists(os.path.join(src_dir, f"{stem}.{ext}")):
+            relocate(f"{stem}.{ext}")
+    return moved, renamed
 
 
 def main():
@@ -203,13 +281,21 @@ def main():
     args = ap.parse_args()
     DIR = args.dir
 
-    # Never analyze our own contact sheet: it lives in the scanned folder, and a
-    # sparse one is mostly dark background, so a re-run could flag and quarantine it.
-    sheet_name = os.path.basename(args.sheet) if args.sheet and args.sheet != "-" \
-        else SHEET_NAME
+    if not os.path.isdir(DIR):
+        sys.exit(f"error: not a directory: {DIR}")
+    # Checked up front: Pillow only rejects an unknown extension at save time,
+    # which would otherwise blow up after the whole folder has been analyzed.
+    if args.sheet and args.sheet != "-":
+        Image.init()
+        ext = os.path.splitext(args.sheet)[1].lower()
+        if ext not in Image.registered_extensions():
+            sys.exit(f"error: --sheet needs a known image extension, got '{ext or args.sheet}' "
+                     f"(try .jpg or .png)")
 
-    files = [os.path.join(DIR, f) for f in sorted(os.listdir(DIR))
-             if f.lower().endswith(IMG_EXT) and f != sheet_name]
+    names = sorted(os.listdir(DIR))
+    skip = sheet_names(names, args.sheet)
+    files = [os.path.join(DIR, f) for f in names
+             if f.lower().endswith(IMG_EXT) and f not in skip]
     items = []
     for p in files:
         try:
@@ -219,11 +305,15 @@ def main():
 
     flagged = [(m, r) for m in items for r in [verdict(m)] if r]
 
+    # Widen the name column to fit the longest name instead of letting it spill
+    # and knock every following column out of alignment.
+    w = max(28, min(60, max((len(m["name"]) for m in items), default=0) + 2))
+
     if args.stats:
-        print(f"{'file':<28}{'blob%':>7}{'dead%':>7}{'dark%':>7}{'flat%':>7}"
+        print(f"{'file':<{w}}{'blob%':>7}{'dead%':>7}{'dark%':>7}{'flat%':>7}"
               f"{'std':>7}{'luma':>7}{'sharp':>9}  flag")
         for m in sorted(items, key=lambda x: -x["blob"]):
-            print(f"{m['name']:<28}{m['blob']*100:7.1f}{m['dead']*100:7.1f}"
+            print(f"{m['name']:<{w}}{m['blob']*100:7.1f}{m['dead']*100:7.1f}"
                   f"{m['darkf']*100:7.1f}{m['flat']*100:7.1f}{m['std']:7.1f}"
                   f"{m['luma']:7.0f}{m['sharp']:9.1f}  {verdict(m) or ''}")
         print()
@@ -235,27 +325,29 @@ def main():
             continue
         print(f"===== {reason.upper()} : {len(rows)} files =====")
         for m in rows:
-            print(f"  {m['name']:<28} {why(m, reason)}")
+            print(f"  {m['name']:<{w}} {why(m, reason)}")
         print()
 
     if not flagged:
         print("Nothing flagged. No contact sheet written, nothing moved.")
         return
 
-    sheet_path = None
+    sheet_paths = []
     if args.sheet != "-":
-        sheet_path = args.sheet or os.path.join(DIR, SHEET_NAME)
-        contact_sheet(flagged, sheet_path)
+        sheet_paths = contact_sheets(flagged, args.sheet or os.path.join(DIR, SHEET_NAME))
 
     if not args.move:
         print("-" * 64)
         print(f"NOTHING WAS CHANGED. All {len(items)} originals are still in place.")
-        if sheet_path:
-            print(f"One new file was written: {sheet_path}")
+        if sheet_paths:
+            label = "One new file was" if len(sheet_paths) == 1 else \
+                    f"{len(sheet_paths)} new files were"
+            print(f"{label} written: {', '.join(sheet_paths)}")
         print("\nWHAT TO DO NEXT")
-        if sheet_path:
-            print(f"  1. Open {os.path.basename(sheet_path)} and look at the "
-                  f"{len(flagged)} flagged image(s).")
+        if sheet_paths:
+            what = "it" if len(sheet_paths) == 1 else "them"
+            print(f"  1. Open {', '.join(os.path.basename(p) for p in sheet_paths)} "
+                  f"and look at the {len(flagged)} flagged image(s) in {what}.")
             print("     A metric can mistake a white shirt or stage lights for a")
             print("     blowout, and a moody shot for 'dark' -- so check by eye.")
             print("  2. If you agree they are junk, re-run the same command with")
@@ -263,28 +355,34 @@ def main():
         else:
             print("  Re-run with --move if you agree the files above are junk.")
         print("\n--move does NOT delete: it relocates files into "
-              "culled/<reason>/,\nwhich you can undo with "
-              "`mv culled/*/* . && rm -rf culled`.")
+              f"culled/<reason>/,\nwhich you can undo with `{UNDO}`.")
         return
 
     base = os.path.join(DIR, "culled")
     print(f"Moving into {base}/ ...")
+    all_renamed = []
     for reason in REASONS:
         dst = os.path.join(base, reason)
         n_still = n_vid = 0
         for m, r in flagged:
             if r != reason:
                 continue
-            for mv in move_with_pair(m["name"], DIR, dst):
+            moved, renamed = move_with_pair(m["name"], DIR, dst)
+            all_renamed += [(reason, a, b) for a, b in renamed]
+            for mv in moved:
                 if mv.lower().endswith(IMG_EXT):
                     n_still += 1
                 else:
                     n_vid += 1
         if n_still or n_vid:
             print(f"  {reason}: {n_still} stills + {n_vid} paired videos")
-    print("\nDone. Undo everything with "
-          "`mv culled/*/* . && rm -rf culled`, or delete one reviewed "
-          "category with `rm -rf culled/<reason>`.")
+    if all_renamed:
+        print("\nRenamed on arrival -- a file of that name was already quarantined")
+        print("from an earlier run, and overwriting it would have been a delete:")
+        for reason, a, b in all_renamed:
+            print(f"  culled/{reason}/{a} was taken, saved as {b}")
+    print(f"\nDone. Undo everything with `{UNDO}`,")
+    print("or delete one reviewed category with `rm -rf culled/<reason>`.")
 
 
 if __name__ == "__main__":
