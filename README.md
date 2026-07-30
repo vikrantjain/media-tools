@@ -14,6 +14,21 @@ which leave the file's bytes identical: they are **renamed**, and they are **mov
 your file browser shows, which lives outside the file and is not part of the image.
 That is a deliberate feature, and it still rewrites none of the photo's own bytes.
 
+## One-step: `/media-organize [folder]`
+
+Runs the whole pipeline unattended — snapshot, metadata survey, rename, cull, dedup — and
+reports at the end. Everything it does is reversible except the rename, which is why step 0
+is a **hardlink snapshot** (`cp -al`): instant, consumes no extra disk, and preserves every
+original filename, which no undo command can. It works because these tools only rename and
+move, never rewrite contents, so the links never diverge.
+
+The snapshot is made as a **sibling** of the target folder, never inside it: `media-rename`
+recurses into subdirectories, so an inner snapshot would be renamed too and protect nothing.
+
+Review afterwards via `cull_review.jpg`, `culled/` and `dupes_by_confidence/`, undo whatever
+you disagree with, then `rm -rf` the snapshot. If you would rather approve each stage, skip
+the command and just ask — the skills below prompt before renaming or moving.
+
 ## Skills
 
 ### `media-metadata` — read metadata
