@@ -90,5 +90,12 @@ Accepts individual files or directories (recurses into dirs with `-r`).
   `IMG_1794.MP4`, so same-directory siblings sharing its `ContentIdentifier` are pulled in
   and reported. Unrelated files are never touched.
 - **Idempotent**: a group already sitting on a correct stem keeps it, so re-running is a
-  no-op rather than a renumbering. Renames are staged through temp names, so a set of files
-  already holding each other's target names swaps cleanly instead of clobbering.
+  no-op rather than a renumbering.
+- **Ordered, not staged**: a file moves straight to its target unless another file still
+  sits there; vacating a path releases whoever was waiting on it. Only a true cycle needs a
+  temp name, and the allocator cannot currently produce one (it never picks a stem another
+  file holds), so in practice nothing is staged. This bounds what an interrupted run can
+  leave behind: previously every file detoured through `<target>.renametmp`, so a crash
+  stranded the whole folder there. If you ever do find `.renametmp` files, no bytes are
+  lost and the intended name is the suffix stripped:
+  `for f in *.renametmp; do mv -n "$f" "${f%.renametmp}"; done`

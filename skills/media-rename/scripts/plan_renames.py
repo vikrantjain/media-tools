@@ -185,19 +185,55 @@ def allocate(groups):
 
 
 def apply_plan(plan):
-    """Two phases via temp names, so a cycle (A->B, B->A) cannot clobber."""
-    staged = []
-    for src, dst, *_ in plan:
-        if os.path.abspath(src) == dst:
+    """Rename in dependency order, staging only files caught in a cycle.
+
+    A file can move straight to its target unless another file still sits there. So
+    renames are ordered: anything whose target is free goes now, and vacating a path
+    releases whoever was waiting on it. Only a true cycle (A wants B's name, B wants A's)
+    has no such starting point, and only those files detour through a temp name.
+
+    Staging *everything* also worked, but an interrupted run then left the whole folder as
+    `<target>.renametmp` -- recoverable, since the intended name is right there in the
+    suffix, but alarming and far wider than the problem warrants.
+
+    In fact `allocate()` cannot currently produce a cycle at all: `stem_free()` refuses any
+    stem occupied by a file outside the group, so a chosen target is never a path another
+    file still holds. The cycle branch is therefore a guard against a future change to the
+    allocator, not a routine path -- it is exercised by feeding apply_plan a hand-built
+    swap, since no folder layout will provoke one.
+    """
+    moves = [(os.path.abspath(src), dst) for src, dst, *_ in plan
+             if os.path.abspath(src) != dst]
+    pending = {src for src, _ in moves}      # paths still holding a file that must move
+
+    ready, waiting = [], defaultdict(list)
+    for src, dst in moves:
+        (waiting[dst] if dst in pending else ready).append((src, dst))
+
+    done = 0
+    while ready:
+        src, dst = ready.pop()
+        if os.path.exists(dst):              # something unexpected claimed it
+            print(f"  SKIPPED (target exists): {src}", file=sys.stderr)
             continue
-        tmp = dst + ".renametmp"
-        n = 0
+        os.rename(src, dst)
+        done += 1
+        pending.discard(src)
+        ready.extend(waiting.pop(src, []))   # src is free now; unblock its waiter
+
+    # Anything left is a cycle. Break it by parking every member on a temp name first.
+    cycles = [m for ms in waiting.values() for m in ms]
+    staged = []
+    for src, dst in cycles:
+        tmp, n = dst + ".renametmp", 0
         while os.path.exists(tmp):
             n += 1
             tmp = f"{dst}.renametmp{n}"
         os.rename(src, tmp)
         staged.append((tmp, dst, src))
-    done = 0
+    if staged:
+        print(f"  {len(staged)} file(s) staged via temp names to break a rename cycle",
+              file=sys.stderr)
     for tmp, dst, src in staged:
         if os.path.exists(dst):
             os.rename(tmp, src)
