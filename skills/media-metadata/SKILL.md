@@ -75,6 +75,8 @@ uv run --with pillow-heif --with pillow python3 \
 ```
 
 `read_meta.py` writes full JSON + prints a summary table (date, device, GPS, dims, duration).
+The first argument is the output path. It must end in `.json`, and the script refuses to
+overwrite any existing file it did not write, so a forgotten OUT cannot clobber a photo.
 The JSON is keyed by **full path**, not basename, so passing two folders that both contain
 `IMG_0001.HEIC` reports both (the table disambiguates them as `d1/IMG_0001.HEIC`).
 Its non-obvious gotchas, if you adapt it: in PIL, `exif.items()` returns `GPSInfo` (0x8825) and

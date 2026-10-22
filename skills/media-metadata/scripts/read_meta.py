@@ -7,6 +7,7 @@ Usage (always via uv so pillow-heif is available):
 PATH may be a directory (scanned non-recursively) or individual files.
 Images -> full EXIF incl. GPS via PIL. Videos -> ffprobe format+streams.
 Writes a {filepath: {...}} JSON map to OUT.json and prints a summary table.
+OUT must end in .json, and an existing OUT is only replaced if this script wrote it.
 """
 import sys, os, json, subprocess
 from collections import Counter
@@ -112,11 +113,37 @@ def display_names(paths):
             for p, b in zip(paths, bases)}
 
 
+def guard_out_path(path):
+    """Refuse an output path that could be one of the user's files.
+
+    OUT.json is the first positional argument, so `read_meta.py *.HEIC` reads the
+    first photo as the output path -- and writing the JSON there destroyed it,
+    with no error. Only a .json path is accepted, and an existing file only when
+    it is a report this script wrote.
+    """
+    if not path.lower().endswith(".json"):
+        sys.exit(f"error: OUT must be a .json path, got {path}\n"
+                 f"usage: read_meta.py OUT.json PATH [PATH ...]")
+    if not os.path.exists(path):
+        return
+    try:
+        with open(path) as fh:
+            prev = json.load(fh)
+        ours = isinstance(prev, dict) and all(
+            isinstance(v, dict) and "kind" in v for v in prev.values())
+    except Exception:
+        ours = False
+    if not ours:
+        sys.exit(f"error: refusing to overwrite {path} -- it exists and was not "
+                 f"written by this script. Pick another OUT path.")
+
+
 def main():
     if len(sys.argv) < 3:
         print(__doc__)
         sys.exit(1)
     out_path, paths = sys.argv[1], sys.argv[2:]
+    guard_out_path(out_path)
     files = gather_files(paths)
     shown = display_names(files)
     results = {}
