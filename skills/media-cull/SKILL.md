@@ -104,7 +104,8 @@ written page 1.
   deliberate: the tool moves files, so decisions must be reproducible and auditable.
   Progress is reported on stderr for runs over 200 files.
 - **Live Photo pairs**: a flagged still's same-stem `.MP4`/`.MOV` moves with it
-  (extension matched case-insensitively, so `.Mp4` pairs too).
+  (extension matched case-insensitively, so `.Mp4` pairs too). The video stays if
+  another still on that stem stays, since it belongs to that one too.
 - **Never overwrites**: if a file of that name is already quarantined from an earlier
   run, the new one lands as `name__1.ext` and the run says so. Overwriting would be
   a silent delete, which this tool does not do.

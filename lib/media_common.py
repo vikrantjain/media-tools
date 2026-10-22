@@ -125,6 +125,11 @@ def free_path(dst_dir, name):
 def move_with_pair(name, src_dir, dst_dir, entries=None):
     """Move a still and its Live Photo video (same stem) together.
 
+    The video stays put while another still on the same stem remains in src_dir:
+    X.HEIC beside its own X.JPG conversion share X.MOV, and dedup flagging the JPG
+    used to carry the keeper's video off with it. If that other still is flagged
+    too, the video goes with whichever of them moves last.
+
     Returns (moved, renamed). `renamed` must be surfaced to the user: a file that
     arrived under a suffixed name is not restored to its original name by the undo
     command, so silently suffixing is a silent surprise at restore time.
@@ -150,10 +155,12 @@ def move_with_pair(name, src_dir, dst_dir, entries=None):
             entries = os.listdir(src_dir)
         except OSError:
             entries = []
-    for f in entries:
+    present = [f for f in entries if os.path.exists(os.path.join(src_dir, f))]
+    if any(os.path.splitext(f)[0] == stem and is_image(f) for f in present):
+        return moved, renamed
+    for f in present:
         b, e = os.path.splitext(f)
-        if b == stem and e.lower() in VID_EXT \
-                and os.path.exists(os.path.join(src_dir, f)):
+        if b == stem and e.lower() in VID_EXT:
             relocate(f)
     return moved, renamed
 

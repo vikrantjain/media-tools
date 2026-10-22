@@ -120,7 +120,8 @@ Scans **the given folder only, not subdirectories**.
 
 - **Live Photo pairs**: when a flagged `.HEIC`/`.JPG` still has a same-stem `.MP4`/`.MOV`,
   that video is moved with it so the pair stays together (extension matched
-  case-insensitively). Videos of *keepers* stay put.
+  case-insensitively). Videos of *keepers* stay put. That includes a keeper sharing
+  the flagged copy's stem (`X.HEIC` kept, `X.JPG` flagged): `X.MOV` stays with `X.HEIC`.
 - **Videos are not hashed**: only still images are compared. Standalone `.MOV`/`.MP4`
   clips (not Live Photo stills) are ignored by the dedup itself.
 - **Never overwrites**: if a file of that name is already quarantined from an earlier
